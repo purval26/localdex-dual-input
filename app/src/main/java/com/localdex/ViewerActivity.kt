@@ -2,7 +2,9 @@ package com.localdex
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -82,7 +84,7 @@ class ViewerActivity : AppCompatActivity() {
             )
             true
         }
-
+        
         makeCloseButtonDraggable()
 
         // Fold/unfold and rotation change the container size without recreating the
@@ -119,7 +121,32 @@ class ViewerActivity : AppCompatActivity() {
             }
         }
     }
+        // Physical mouse input is delivered as generic MotionEvents rather than
+        // normal touchscreen events. Keep this path separate from touch so both
+        // input methods work at the same time.
+        //
+        // SOURCE_MOUSE includes movement, hover, buttons and wheel scrolling.
+        override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+            if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
+                val s = session
 
+                if (s != null) {
+                    val handled = s.controller?.forwardMouseEvent(
+                        event,
+                        surfaceView.width,
+                        surfaceView.height,
+                        s.videoWidth,
+                        s.videoHeight
+                    ) == true
+
+                    if (handled) {
+                        return true
+                    }
+                }
+            }
+
+            return super.dispatchGenericMotionEvent(event)
+        }
     /** Hands the surface to the decoder once both exist. Idempotent. */
     private fun offerSurface() {
         if (!surfaceReady || surfaceGivenToDecoder) return
