@@ -123,7 +123,6 @@ class Controller(
         buffer.putInt(buttons)
         queue.offer(buffer.array())
     }
-
     private fun sendScroll(
         x: Int,
         y: Int,
@@ -131,6 +130,7 @@ class Controller(
         videoHeight: Int,
         hScroll: Float,
         vScroll: Float,
+        buttons: Int = 0,
     ) {
         val buffer = ByteBuffer.allocate(21)
         buffer.put(TYPE_INJECT_SCROLL_EVENT.toByte())
@@ -140,10 +140,10 @@ class Controller(
         buffer.putShort(videoHeight.toShort())
         buffer.putShort(scrollToI16FixedPoint(hScroll))
         buffer.putShort(scrollToI16FixedPoint(vScroll))
-        buffer.putInt(0) // buttons
+        buffer.putInt(buttons)
         queue.offer(buffer.array())
     }
-
+    
     // -- Gesture translation ----------------------------------------------------------
 
     private enum class Gesture { NONE, MOUSE, SCROLL, DONE }
@@ -246,6 +246,114 @@ class Controller(
                 gesture = Gesture.NONE
             }
         }
+    }
+        /**
+     * Forwards a real physical mouse MotionEvent.
+     *
+     * Physical mouse events are kept separate from touchscreen gestures so
+     * both input methods continue to work simultaneously.
+     */
+    fun forwardMouseEvent(
+        event: MotionEvent,
+        viewWidth: Int,
+        viewHeight: Int,
+        videoWidth: Int,
+        videoHeight: Int,
+    ): Boolean {
+        if (viewWidth == 0 || viewHeight == 0 ||
+            videoWidth == 0 || videoHeight == 0
+        ) {
+            return false
+        }
+
+        fun videoX(): Int =
+            (event.x * videoWidth / viewWidth)
+                .toInt()
+                .coerceIn(0, videoWidth - 1)
+
+        fun videoY(): Int =
+            (event.y * videoHeight / viewHeight)
+                .toInt()
+                .coerceIn(0, videoHeight - 1)
+
+        val x = videoX()
+        val y = videoY()
+        val buttons = event.buttonState
+
+        when (event.actionMasked) {
+
+            // Mouse movement without buttons = hover.
+            // Movement while a button is held = drag.
+            MotionEvent.ACTION_HOVER_MOVE,
+            MotionEvent.ACTION_MOVE -> {
+                sendMouse(
+                    MotionEvent.ACTION_MOVE,
+                    x,
+                    y,
+                    videoWidth,
+                    videoHeight,
+                    if (buttons != 0) 1f else 0f,
+                    0,
+                    buttons,
+                )
+                return true
+            }
+
+            // Left / right / middle / side button press.
+            MotionEvent.ACTION_BUTTON_PRESS -> {
+                sendMouse(
+                    MotionEvent.ACTION_DOWN,
+                    x,
+                    y,
+                    videoWidth,
+                    videoHeight,
+                    1f,
+                    event.actionButton,
+                    buttons,
+                )
+                return true
+            }
+
+            // Button release.
+            MotionEvent.ACTION_BUTTON_RELEASE -> {
+                sendMouse(
+                    MotionEvent.ACTION_UP,
+                    x,
+                    y,
+                    videoWidth,
+                    videoHeight,
+                    0f,
+                    event.actionButton,
+                    buttons,
+                )
+                return true
+            }
+
+            // Physical mouse wheel.
+            MotionEvent.ACTION_SCROLL -> {
+                val hScroll =
+                    event.getAxisValue(MotionEvent.AXIS_HSCROLL)
+
+                val vScroll =
+                    event.getAxisValue(MotionEvent.AXIS_VSCROLL)
+
+                if (hScroll != 0f || vScroll != 0f) {
+                    sendScroll(
+                        x,
+                        y,
+                        videoWidth,
+                        videoHeight,
+                        hScroll,
+                        vScroll,
+                        buttons,
+                    )
+                }
+
+                return true
+            }
+        }
+
+        return false
     }
 
     private fun pressureToU16FixedPoint(pressure: Float): Short {
